@@ -47,12 +47,12 @@ local DEFAULTS = {
 	water = false,
 	snap = "1",
 	freecam = false,
-	freecamSpeed = "32",
-	freecamToggleKey = "",
+	freecamSpeed = "200",
+	freecamToggleKey = "x",
 	advancedMoveEnabled = false,
 	advancedMoveKey = "r",
-	advancedInfoEnabled = false,
-	advancedInfoKey = "i",
+	advancedInfoEnabled = true,
+	advancedInfoKey = "u",
 }
 
 local Settings = {}
