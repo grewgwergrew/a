@@ -47,12 +47,12 @@ local DEFAULTS = {
 	water = false,
 	snap = "1",
 	freecam = false,
-	freecamSpeed = "200",
-	freecamToggleKey = "x",
+	freecamSpeed = "32",
+	freecamToggleKey = "",
 	advancedMoveEnabled = false,
 	advancedMoveKey = "r",
-	advancedInfoEnabled = true,
-	advancedInfoKey = "u",
+	advancedInfoEnabled = false,
+	advancedInfoKey = "i",
 }
 
 local Settings = {}
@@ -378,24 +378,24 @@ local function getGuiObjectsAtPosition(x, y)
 end
 
 do
-	local aboutPage = createTab("About")
-local aboutCard = Instance.new("Frame")
-aboutCard.Size = UDim2.new(1, -8, 1, -8)
-aboutCard.BackgroundColor3 = THEME.Card
-aboutCard.BorderSizePixel = 0
-aboutCard.Parent = aboutPage
-round(aboutCard, 10)
+	local infoPage = createTab("Info")
+local infoCard = Instance.new("Frame")
+infoCard.Size = UDim2.new(1, -8, 1, -8)
+infoCard.BackgroundColor3 = THEME.Card
+infoCard.BorderSizePixel = 0
+infoCard.Parent = infoPage
+round(infoCard, 10)
 
-local aboutTitle = Instance.new("TextLabel")
-aboutTitle.Size = UDim2.new(1, -24, 0, 28)
-aboutTitle.Position = UDim2.new(0, 12, 0, 10)
-aboutTitle.BackgroundTransparency = 1
-aboutTitle.Text = "About this script"
-aboutTitle.TextColor3 = THEME.Text
-aboutTitle.Font = Enum.Font.GothamBold
-aboutTitle.TextSize = 16
-aboutTitle.TextXAlignment = Enum.TextXAlignment.Left
-aboutTitle.Parent = aboutCard
+local infoTitle = Instance.new("TextLabel")
+infoTitle.Size = UDim2.new(1, -24, 0, 28)
+infoTitle.Position = UDim2.new(0, 12, 0, 10)
+infoTitle.BackgroundTransparency = 1
+infoTitle.Text = "Debug Info"
+infoTitle.TextColor3 = THEME.Text
+infoTitle.Font = Enum.Font.GothamBold
+infoTitle.TextSize = 16
+infoTitle.TextXAlignment = Enum.TextXAlignment.Left
+infoTitle.Parent = infoCard
 
 local function getPath(instance)
 	if not instance then return "unavailable" end
@@ -407,20 +407,20 @@ local scriptLocation = "executor-managed script"
 pcall(function()
 	if script and script:IsA("LuaSourceContainer") then scriptLocation = getPath(script) end
 end)
-local aboutInfo = Instance.new("TextLabel")
-aboutInfo.Size = UDim2.new(1, -24, 0, 58)
-aboutInfo.Position = UDim2.new(0, 12, 0, 42)
-aboutInfo.BackgroundTransparency = 1
-aboutInfo.TextColor3 = THEME.SubText
-aboutInfo.Font = Enum.Font.Gotham
-aboutInfo.TextSize = 12
-aboutInfo.TextWrapped = true
-aboutInfo.TextYAlignment = Enum.TextYAlignment.Top
-aboutInfo.TextXAlignment = Enum.TextXAlignment.Left
-aboutInfo.Text = "UI container: " .. getPath(executorGui)
+local infoInfo = Instance.new("TextLabel")
+infoInfo.Size = UDim2.new(1, -24, 0, 58)
+infoInfo.Position = UDim2.new(0, 12, 0, 42)
+infoInfo.BackgroundTransparency = 1
+infoInfo.TextColor3 = THEME.SubText
+infoInfo.Font = Enum.Font.Gotham
+infoInfo.TextSize = 12
+infoInfo.TextWrapped = true
+infoInfo.TextYAlignment = Enum.TextYAlignment.Top
+infoInfo.TextXAlignment = Enum.TextXAlignment.Left
+infoInfo.Text = "UI container: " .. getPath(executorGui)
 	.. "\nMain window: " .. getPath(gui)
 	.. "\nScript instance: " .. scriptLocation
-aboutInfo.Parent = aboutCard
+infoInfo.Parent = infoCard
 
 
 end
@@ -623,6 +623,51 @@ refresh.MouseButton1Click:Connect(function()
 		for _, marker in ipairs(highlightFolder:GetChildren()) do
 			marker:Destroy()
 		end
+	end
+end)
+
+-- Keep the finder list in sync with trees appearing or disappearing.
+local treeRegionConnections = {}
+local treeRefreshQueued = false
+
+local function scheduleTreeRefresh()
+	if treeRefreshQueued then return end
+	treeRefreshQueued = true
+	task.defer(function()
+		treeRefreshQueued = false
+		ScanTrees()
+		BuildTreeList()
+	end)
+end
+
+local function watchTreeRegion(region)
+	if not (region:IsA("Model") and region.Name == "TreeRegion") then return false end
+	if treeRegionConnections[region] then return true end
+	treeRegionConnections[region] = {
+		region.ChildAdded:Connect(scheduleTreeRefresh),
+		region.ChildRemoved:Connect(scheduleTreeRefresh),
+	}
+	return true
+end
+
+for _, child in ipairs(workspace:GetChildren()) do
+	watchTreeRegion(child)
+end
+
+workspace.ChildAdded:Connect(function(child)
+	if watchTreeRegion(child) then
+		scheduleTreeRefresh()
+	end
+end)
+
+workspace.ChildRemoved:Connect(function(child)
+	local connections = treeRegionConnections[child]
+	if connections then
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+		treeRegionConnections[child] = nil
+		scheduleTreeRefresh()
 	end
 end)
 
@@ -1258,8 +1303,6 @@ buildingOptionsLayout.Parent = buildPage
 local giveToolButton = makeButton(buildPage, "Give Blueprint Tool", UDim2.new(1, -8, 0, 42))
 giveToolButton.LayoutOrder = 1
 
-local advancedMoveEnabled = Settings.advancedMoveEnabled == true
-
 local advancedInfoEnabled = Settings.advancedInfoEnabled == true
 local advancedInfoCard = Instance.new("Frame")
 advancedInfoCard.Size = UDim2.new(1, -8, 0, 100)
@@ -1534,8 +1577,6 @@ local function applyPreview()
 	end
 end
 
-local shouldIgnoreUnanchoredParts
-
 local function setPreviewRotation(newRotation)
 	if not previewModel then
 		rotCF = newRotation
@@ -1543,35 +1584,19 @@ local function setPreviewRotation(newRotation)
 	end
 	-- Keep the model's bounds center fixed while its orientation changes, so
 	-- rotation behaves as if it were around the middle instead of the pivot.
-	local ignoreUnanchored = selectedEntry and selectedEntry.kind == "model"
-		and shouldIgnoreUnanchoredParts(selectedEntry.model)
-	local centerBefore = worldBounds(previewModel, ignoreUnanchored)
+	local centerBefore = worldBounds(previewModel)
 	rotCF = newRotation
 	previewModel:PivotTo(CFrame.new(previewPos) * rotCF)
-	local centerAfter = worldBounds(previewModel, ignoreUnanchored)
+	local centerAfter = worldBounds(previewModel)
 	previewPos += centerBefore - centerAfter
 	applyPreview()
 end
 
 -- World-aligned bounds of a model (center, size)
-local IGNORE_UNANCHORED_FOR_ITEM_NAMES = {
-	ChopSaw = true,
-	Lever0 = true
-}
-
-shouldIgnoreUnanchoredParts = function(model)
-	if not model then return false end
-	local itemName = model:FindFirstChild("ItemName")
-	return itemName ~= nil and itemName:IsA("StringValue")
-		and IGNORE_UNANCHORED_FOR_ITEM_NAMES[itemName.Value] == true
-end
-
-worldBounds = function(model, ignoreUnanchored)
+worldBounds = function(model)
 	local minV, maxV
 	for _, part in ipairs(model:GetDescendants()) do
-		local markedUnanchored = ignoreUnanchored and part:GetAttribute("AdvancedMoveIgnoreBounds")
-		if part:IsA("BasePart") and not markedUnanchored
-			and (not ignoreUnanchored or part.Anchored) then
+		if part:IsA("BasePart") then
 			local h = part.Size / 2
 			local cf = part.CFrame
 			for _, x in ipairs({-1, 1}) do
@@ -1882,7 +1907,7 @@ local function bindKeys()
 end
 
 local function selectBlueprint(entry)
-	local source = entry.kind == "model" and entry.model or getPlacementModel(entry.id)
+	local source = entry.kind == "model" and (entry.previewSource or entry.model) or getPlacementModel(entry.id)
 	if not source then
 		setStatus("No placement model found for " .. entry.display .. ".")
 		return
@@ -1911,23 +1936,6 @@ local function selectBlueprint(entry)
 		wrapper.PrimaryPart = clone
 		clone = wrapper
 	end
-	if entry.kind == "model" and shouldIgnoreUnanchoredParts(source) then
-		local sourceParts = {}
-		for _, descendant in ipairs(source:GetDescendants()) do
-			if descendant:IsA("BasePart") then table.insert(sourceParts, descendant) end
-		end
-		local clonedParts = {}
-		for _, descendant in ipairs(clone:GetDescendants()) do
-			if descendant:IsA("BasePart") then table.insert(clonedParts, descendant) end
-		end
-		for index, sourcePart in ipairs(sourceParts) do
-			local clonedPart = clonedParts[index]
-			if clonedPart and not sourcePart.Anchored then
-				clonedPart:SetAttribute("AdvancedMoveIgnoreBounds", true)
-			end
-		end
-	end
-
 	clone.Name = "BlueprintPreview"
 	stylePreview(clone)
 	clone.Parent = workspace
@@ -1938,7 +1946,7 @@ local function selectBlueprint(entry)
 	pickerGui.Enabled = false
 
 	if entry.kind == "model" then
-		local pivot = source:GetPivot()
+		local pivot = entry.model:GetPivot()
 		previewPos = pivot.Position
 		rotCF = pivot - pivot.Position
 	elseif not hadPreview and hrp then
@@ -2372,25 +2380,34 @@ round(infoCloseButton, 8)
 hover(infoCloseButton, THEME.Button, THEME.ButtonHover)
 
 local infoTarget
-local infoItemId
 local infoIsMovable = false
 local function closeAdvancedInfo()
 	advancedInfoGui.Enabled = false
 	infoWoodViewport:ClearAllChildren()
 	infoWoodViewport.Visible = false
 	infoTarget = nil
-	infoItemId = nil
 end
 
 infoCloseButton.MouseButton1Click:Connect(closeAdvancedInfo)
 infoMoveButton.MouseButton1Click:Connect(function()
 	if not infoTarget or not infoIsMovable then return end
 	local target = infoTarget
-	local id = infoItemId
-	if not id then return end
+	local itemName = target:FindFirstChild("ItemName")
+	if not (itemName and itemName:IsA("StringValue") and itemName.Value ~= "") then
+		advancedInfoStatus.Text = "This model has no ItemName StringValue."
+		return
+	end
+	local id = itemName.Value
+	local clientItemInfo = ReplicatedStorage:FindFirstChild("ClientItemInfo")
+	local itemInfo = clientItemInfo and clientItemInfo:FindFirstChild(id)
+	local previewSource = itemInfo and itemInfo:FindFirstChild("Model")
+	if not (previewSource and previewSource:IsA("Model")) then
+		advancedInfoStatus.Text = "No Model preview found in ClientItemInfo for " .. id .. "."
+		return
+	end
 	local display = infoName.Text .. " [" .. infoType.Text .. "]"
 	closeAdvancedInfo()
-	selectBlueprint({id = id, display = display, kind = "model", model = target})
+	selectBlueprint({id = id, display = display, kind = "model", model = target, previewSource = previewSource})
 end)
 -- Destroy is intentionally display-only for now.
 
@@ -2583,7 +2600,6 @@ local function showAdvancedInfo(target)
 		or modelTypeName == "Blueprint")
 	infoIsMovable = movableType
 	infoTarget = target
-	infoItemId = itemId
 	infoMoveButton.Visible = movableType
 	infoDestroyButton.Visible = movableType
 	if isTree then
@@ -2755,76 +2771,12 @@ local advancedInfoInputConn = UserInputService.InputBegan:Connect(function(input
 	if target then showAdvancedInfo(target) end
 end)
 
-local function getHoveredMovable()
-	local camera = workspace.CurrentCamera
-	local playerModelsFolder = workspace:FindFirstChild("PlayerModels")
-	if not camera or not playerModelsFolder then return nil end
-	local mouse = UserInputService:GetMouseLocation()
-	local ray = camera:ViewportPointToRay(mouse.X, mouse.Y)
-	local targetModel = nil
-	local closestDistance = math.huge
-	local function rayBoxDistance(boxCFrame, boxSize)
-		local origin = boxCFrame:PointToObjectSpace(ray.Origin)
-		local direction = boxCFrame:VectorToObjectSpace(ray.Direction)
-		local half = boxSize / 2
-		local minimum, maximum = 0, math.huge
-		for _, axis in ipairs({"X", "Y", "Z"}) do
-			local o, d, h = origin[axis], direction[axis], half[axis]
-			if math.abs(d) < 1e-6 then
-				if o < -h or o > h then return nil end
-			else
-				local a, b = (-h - o) / d, (h - o) / d
-				if a > b then a, b = b, a end
-				minimum = math.max(minimum, a)
-				maximum = math.min(maximum, b)
-				if maximum < minimum then return nil end
-			end
-		end
-		return minimum
-	end
-	for _, candidate in ipairs(playerModelsFolder:GetDescendants()) do
-		if candidate:IsA("Model") then
-			local modelType = candidate:FindFirstChild("Type")
-			if modelType and modelType:IsA("StringValue")
-				and (modelType.Value == "Structure" or modelType.Value == "Vehicle Spot"
-					or modelType.Value == "Furniture" or modelType.Value == "Blueprint") then
-				local boxCFrame, boxSize = candidate:GetBoundingBox()
-				if boxSize.Magnitude > 0 then
-					local distance = rayBoxDistance(boxCFrame, boxSize)
-					if distance and distance < closestDistance then
-						closestDistance = distance
-						targetModel = candidate
-					end
-				end
-			end
-		end
-	end
-	return targetModel
-end
-
 local mouseDownConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if input.UserInputType == Enum.UserInputType.MouseButton1
 		and previewModel and not pointerOverUi() then
 		holdingMouse = true
 	end
 end)
-
-local function startAdvancedMoveAtCursor()
-	if previewModel or UserInputService:GetFocusedTextBox() or pointerOverUi() then return end
-	local target = getHoveredMovable()
-	if not target then
-		return
-	end
-	local itemName = target:FindFirstChild("ItemName")
-	local modelType = target:FindFirstChild("Type")
-	if not (itemName and itemName:IsA("StringValue") and modelType) then
-		setStatus("This model is missing ItemName or Type data.")
-		return
-	end
-	local id = itemName.Value
-	local display = getDisplayName(id) .. " [" .. modelType.Value .. "]"
-	selectBlueprint({id = id, display = display, kind = "model", model = target})
-end
 
 local mouseUpConn = UserInputService.InputEnded:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -2853,9 +2805,7 @@ local dragConn = RunService.RenderStepped:Connect(function()
 	local result = workspace:Raycast(ray.Origin, ray.Direction * 2000, buildRayParams)
 
 	-- offset between the model's pivot and the centre of its bounds (current rotation)
-	local movingModel = selectedEntry and selectedEntry.kind == "model"
-		and shouldIgnoreUnanchoredParts(selectedEntry.model)
-	local center, size = worldBounds(previewModel, movingModel)
+	local center, size = worldBounds(previewModel)
 	local offset = previewPos - center
 
 	local hit
@@ -2904,7 +2854,7 @@ local dragConn = RunService.RenderStepped:Connect(function()
 				and support:IsDescendantOf(playerModelsFolder)
 			local supportCenter, supportSize
 			if isPlayerModel then
-				supportCenter, supportSize = worldBounds(support, shouldIgnoreUnanchoredParts(support))
+				supportCenter, supportSize = worldBounds(support)
 			else
 				supportCenter = result.Instance.Position
 				supportSize = result.Instance.Size
@@ -3262,7 +3212,7 @@ do
 	local rayParams = RaycastParams.new()
 	rayParams.FilterType = Enum.RaycastFilterType.Exclude
 
-	local DEFAULT_TEXT = "Must be next to the item you're teleporting!!!"
+	local DEFAULT_TEXT = "Equip the tool, select an item, choose a destination, then teleport it."
 
 	-- Center + world-aligned size for a model or a single part
 	local function getBounds(obj)
@@ -3917,7 +3867,7 @@ end
 -- Window controls
 -------------------------------------------------
 
-selectTab("About")
+selectTab("Info")
 
 close.MouseButton1Click:Connect(function()
 	fastTrucksOn = false -- direct variable, so the saved setting stays as you left it
